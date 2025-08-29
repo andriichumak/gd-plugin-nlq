@@ -1,6 +1,12 @@
 import React, { ReactElement } from "react";
 import { CreatedVisualization } from "@gooddata/api-client-tiger";
-import { IDashboardWidgetProps } from "@gooddata/sdk-ui-dashboard";
+import {
+    IDashboardWidgetProps,
+    useDashboardSelector,
+    selectFilterContextFilters,
+    dashboardDateFilterToDateFilterByWidget,
+    dashboardAttributeFilterToAttributeFilter,
+ } from "@gooddata/sdk-ui-dashboard";
 import { Button, Typography, Spinner } from "@gooddata/sdk-ui-kit";
 import { BarChart, ColumnChart, Headline, LineChart, PieChart } from "@gooddata/sdk-ui-charts";
 import { PivotTable } from "@gooddata/sdk-ui-pivot";
@@ -27,6 +33,8 @@ import {
     MeasureBuilder,
     GenAIMetricType,
     ObjectType,
+    mergeFilters,
+    isDashboardAttributeFilter,
 } from "@gooddata/sdk-model";
 
 const VIS_HEIGHT = 400;
@@ -49,6 +57,7 @@ const renderBarChart = (visualization: any) => (
         measures={visualization.metrics || []}
         viewBy={[visualization.dimensions?.[0], visualization.dimensions?.[1]].filter(Boolean)}
         stackBy={visualization.metrics?.length <= 1 ? visualization.dimensions?.[2] : undefined}
+        filters={visualization.filters}
         config={{
             ...visualizationTooltipOptions,
             ...legendTooltipOptions,
@@ -64,6 +73,7 @@ const renderColumnChart = (visualization: any) => (
         measures={visualization.metrics || []}
         viewBy={[visualization.dimensions?.[0], visualization.dimensions?.[1]].filter(Boolean)}
         stackBy={visualization.metrics?.length <= 1 ? visualization.dimensions?.[2] : undefined}
+        filters={visualization.filters}
         config={{
             ...visualizationTooltipOptions,
             ...legendTooltipOptions,
@@ -79,6 +89,7 @@ const renderLineChart = (visualization: any) => (
         measures={visualization.metrics || []}
         trendBy={visualization.dimensions?.[0]}
         segmentBy={visualization.metrics?.length <= 1 ? visualization.dimensions?.[1] : undefined}
+        filters={visualization.filters}
         config={{
             ...visualizationTooltipOptions,
             ...legendTooltipOptions,
@@ -91,6 +102,7 @@ const renderPieChart = (visualization: any) => (
         height={VIS_HEIGHT}
         measures={visualization.metrics || []}
         viewBy={visualization.metrics?.length <= 1 ? visualization.dimensions?.[0] : undefined}
+        filters={visualization.filters}
         config={{
             ...visualizationTooltipOptions,
         }}
@@ -101,6 +113,7 @@ const renderTable = (visualization: any) => (
     <PivotTable
         measures={visualization.metrics || []}
         rows={visualization.dimensions || []}
+        filters={visualization.filters}
     />
 );
 
@@ -109,6 +122,7 @@ const renderHeadline = (visualization: any) => (
         height={VIS_HEIGHT}
         primaryMeasure={visualization.metrics?.[0]}
         secondaryMeasures={[visualization.metrics?.[1], visualization.metrics?.[2]].filter(Boolean)}
+        filters={visualization.filters}
     />
 );
 
@@ -134,18 +148,18 @@ const renderVisualization = (execution: any, type: string) => {
     }
 };
 
-const useExecution = (vis: CreatedVisualization | null) => {
+const useExecution = (vis: CreatedVisualization | null, dashboardFilters: any[]) => {
     return React.useMemo(() => {
         if (!vis) {
             return {
                 metrics: [],
                 dimensions: [],
-                filters: [],
+                filters: dashboardFilters ?? [],
             };
         }
 
-        return prepareExecution(vis);
-    }, [vis]);
+        return prepareExecution(vis, dashboardFilters);
+    }, [vis, dashboardFilters]);
 };
 
 const typeMap: { [key in GenAIMetricType]: ObjectType } = {
@@ -154,14 +168,28 @@ const typeMap: { [key in GenAIMetricType]: ObjectType } = {
     metric: "measure",
 };
 
-const prepareExecution = (vis: CreatedVisualization) => {
+const prepareExecution = (vis: CreatedVisualization, dashboardFilters: any[]) => {
     const dimensions = vis.dimensionality?.map((d) => newAttribute(d.id)) ?? [];
     const metrics =
         vis.metrics?.map((md) => newMeasure(idRef(md.id, typeMap[md.type]), measureBuilder(md))) ?? [];
+    const visFilters = dashboardFilters.map(convertDashboardFilters);
     // @ts-ignore
-    const filters = (vis.filters?.map(convertFilter).filter(Boolean) as IFilter[]) ?? [];
+    const filters = mergeFilters(visFilters, (vis.filters?.map(convertFilter).filter(Boolean) as IFilter[]) ?? []);
 
     return { metrics, dimensions, filters };
+};
+
+const convertDashboardFilters = (filter: any) => {
+    if (isDashboardAttributeFilter(filter)) {
+        return dashboardAttributeFilterToAttributeFilter(filter);
+    }
+
+    return dashboardDateFilterToDateFilterByWidget(filter, {
+        dateDataSet: {
+            type: "dataSet",
+            identifier: "date",
+        },
+    });
 };
 
 const measureBuilder = (md: IGenAIVisualizationMetric) => (m: MeasureBuilder) => {
@@ -260,7 +288,10 @@ export const getAiVisualization = (dashboardId: string) => function AiVisualizat
         error,
         initialError,
     } = useAiVisualization(dashboardId);
-    const execution = useExecution(visualizationData);
+    const dashboardFilters = useDashboardSelector(selectFilterContextFilters);
+    const execution = useExecution(visualizationData, dashboardFilters);
+
+    console.log(dashboardFilters, execution);
 
     // Show initial loading state
     if (isInitialLoading) {

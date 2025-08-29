@@ -151,18 +151,13 @@ export function useAiVisualization(dashboardId: string): UseAiVisualizationRetur
     };
 }
 
-const getApiClientDirtyHack = (backend: IAnalyticalBackend): ITigerClient => {
-    // @ts-ignore
-    if (backend.client) {
-        // @ts-ignore
-        return backend.client;
-    }
-
-    // @ts-ignore
-    if (backend?.decorated.client) {
-        // @ts-ignore
-        return backend.decorated.client;
-    }
+const getApiClientDirtyHack = (backend: any): ITigerClient => {
+    do {
+        if (backend.client) {
+            return backend.client;
+        }
+        backend = backend.decorated;
+    } while (backend);
 
     throw new Error("Failed to retrieve API Client instance");
 };
